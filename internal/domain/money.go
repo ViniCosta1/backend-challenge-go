@@ -140,6 +140,9 @@ func (m Money) Negate() (Money, error) {
 }
 
 // Compare Operation
+// -1 -> Less
+// 0  -> Equal
+// 1  -> More
 func (m Money) Compare(other Money) (int, error) {
 	if m.currency != other.currency {
 		return 0, errors.New("currency mismatch")
