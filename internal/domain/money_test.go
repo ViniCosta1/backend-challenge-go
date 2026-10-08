@@ -40,6 +40,22 @@ func TestParseAmount(t *testing.T) {
 			input:   "25.000",
 			wantErr: true,
 		},
+		{name: "maximum int64", input: "92233720368547758.07", want: math.MaxInt64},
+		{name: "overflow by cents", input: "92233720368547758.08", wantErr: true},
+		{name: "overflow integer component", input: "922337203685477580.00", wantErr: true},
+		{name: "empty", input: "", wantErr: true},
+		{name: "leading plus", input: "+1.00", wantErr: true},
+		{name: "negative", input: "-1.00", wantErr: true},
+		{name: "signed cents plus", input: "1.+1", wantErr: true},
+		{name: "signed cents minus", input: "1.-1", wantErr: true},
+		{name: "NaN", input: "NaN", wantErr: true},
+		{name: "Infinity", input: "Infinity", wantErr: true},
+		{name: "scientific notation", input: "1e2.00", wantErr: true},
+		{name: "leading whitespace", input: " 1.00", wantErr: true},
+		{name: "trailing whitespace", input: "1.00 ", wantErr: true},
+		{name: "extra decimal point", input: "1.00.00", wantErr: true},
+		{name: "missing integer component", input: ".00", wantErr: true},
+		{name: "non decimal character", input: "1a.00", wantErr: true},
 	}
 
 	for _, tt := range tests {

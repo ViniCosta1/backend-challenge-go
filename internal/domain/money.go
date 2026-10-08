@@ -31,33 +31,25 @@ func NewMoney(amount int64, currency string) (Money, error) {
 
 // Amount String to Int64
 func ParseAmount(amount string) (int64, error) {
-	// amount must not be empty
 	if amount == "" {
 		return 0, errors.New("amount must not be empty")
 	}
 
-	// amount must be positive
-	if strings.HasPrefix(amount, "-") {
-		return 0, errors.New("amount must not start with '-'")
-	}
-
 	parts := strings.Split(amount, ".")
-
-	// amount just only one decimal point
 	if len(parts) != 2 {
 		return 0, errors.New("amount must contain exactly one '.'")
 	}
 
 	integers, decimals := parts[0], parts[1]
-
-	// amount -> "xx.xx" 2 decimals always
-	if len(decimals) != 2 {
-		return 0, errors.New("amount must be two decimals")
+	if integers == "" || len(decimals) != 2 {
+		return 0, errors.New("amount must use decimal format with exactly two decimal places")
 	}
-
-	// amount must have integer "xx.xx"
-	if len(integers) == 0 {
-		return 0, errors.New("invalid amount format")
+	for _, part := range []string{integers, decimals} {
+		for _, character := range part {
+			if character < '0' || character > '9' {
+				return 0, errors.New("amount must contain only decimal digits")
+			}
+		}
 	}
 
 	i, err := strconv.ParseInt(integers, 10, 64)
@@ -74,9 +66,7 @@ func ParseAmount(amount string) (int64, error) {
 		return 0, errors.New("amount overflow")
 	}
 
-	newAmount := i*100 + d // TODO: integer64 overflow -> treat
-
-	return newAmount, nil
+	return i*100 + d, nil
 }
 
 // Add Operation
@@ -188,4 +178,12 @@ func (m Money) MarshalJSON() ([]byte, error) {
 
 func ZeroMoney(currency string) (Money, error) {
 	return NewMoney(0, currency)
+}
+
+func (m Money) Amount() int64 {
+	return m.amount
+}
+
+func (m Money) Currency() string {
+	return m.currency
 }

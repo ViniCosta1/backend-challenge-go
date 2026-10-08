@@ -5,12 +5,14 @@ import (
 	"time"
 )
 
+var ErrInsufficientBalance = errors.New("insufficient balance")
+
 type Wallet struct {
 	id        string // wallet-uuid....
 	playerID  string // player-uuid....
 	currency  string
 	balance   Money
-	version   int32
+	version   int64
 	createdAt time.Time
 	updatedAt time.Time
 }
@@ -28,8 +30,8 @@ func NewWallet(
 		return Wallet{}, errors.New("player id is required")
 	}
 
-	if initialBalance.amount < 0 {
-		return Wallet{}, errors.New("initial balance must be non-negative")
+	if initialBalance.currency != "BRL" || initialBalance.amount < 0 {
+		return Wallet{}, errors.New("initial balance must be valid non-negative BRL Money")
 	}
 
 	now := time.Now().UTC()
@@ -50,7 +52,7 @@ func RehydrateWallet(
 	playerID string,
 	currency string,
 	balance Money,
-	version int32,
+	version int64,
 	createdAt time.Time,
 	updatedAt time.Time,
 ) (Wallet, error) {
@@ -66,12 +68,14 @@ func RehydrateWallet(
 		return Wallet{}, errors.New("wallet version must be at least 1")
 	}
 
-	if balance.amount < 0 {
-		return Wallet{}, errors.New("wallet balance cannot be negative")
+	if currency != "BRL" || balance.currency != currency || balance.amount < 0 {
+		return Wallet{}, errors.New("wallet balance must be valid non-negative BRL Money")
 	}
 
-	if balance.currency != currency {
-		return Wallet{}, errors.New("wallet currency does not match balance currency")
+	if createdAt.IsZero() || updatedAt.IsZero() ||
+		createdAt.Location() != time.UTC || updatedAt.Location() != time.UTC ||
+		updatedAt.Before(createdAt) {
+		return Wallet{}, errors.New("wallet timestamps must be valid UTC values in chronological order")
 	}
 
 	return Wallet{
@@ -100,7 +104,7 @@ func (w *Wallet) Debit(amount Money) error {
 	}
 
 	if comparison < 0 { // w.balance.amount is less than amount?
-		return errors.New("insufficient balance")
+		return ErrInsufficientBalance
 	}
 
 	newBalance, err := w.balance.Subtract(amount)
@@ -153,7 +157,7 @@ func (w *Wallet) Balance() Money {
 	return w.balance
 }
 
-func (w *Wallet) Version() int32 {
+func (w *Wallet) Version() int64 {
 	return w.version
 }
 

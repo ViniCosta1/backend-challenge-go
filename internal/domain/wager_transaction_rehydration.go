@@ -27,7 +27,9 @@ type RehydrateWagerTransactionParams struct {
 	Status      WagerStatus
 	FailureCode FailureCode
 
-	ResultBalance *Money
+	ResultBalance          *Money
+	ReferenceAttempts      int32
+	ReferenceNextAttemptAt *time.Time
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -38,6 +40,16 @@ func RehydrateWagerTransaction(
 ) (WagerTransaction, error) {
 	if err := validateRehydratedWagerTransaction(p); err != nil {
 		return WagerTransaction{}, err
+	}
+	var balance *Money
+	if p.ResultBalance != nil {
+		copy := *p.ResultBalance
+		balance = &copy
+	}
+	var nextAttempt *time.Time
+	if p.ReferenceNextAttemptAt != nil {
+		copy := *p.ReferenceNextAttemptAt
+		nextAttempt = &copy
 	}
 
 	return WagerTransaction{
@@ -56,7 +68,9 @@ func RehydrateWagerTransaction(
 		referenceTransactionID:         p.ReferenceTransactionID,
 		status:                         p.Status,
 		failureCode:                    p.FailureCode,
-		resultBalance:                  p.ResultBalance,
+		resultBalance:                  balance,
+		referenceAttempts:              p.ReferenceAttempts,
+		referenceNextAttemptAt:         nextAttempt,
 		createdAt:                      p.CreatedAt,
 		updatedAt:                      p.UpdatedAt,
 	}, nil
@@ -73,6 +87,15 @@ func validateRehydratedWagerTransaction(
 	}
 	if !isValidWagerStatus(p.Status) {
 		return ErrInvalidWagerStatus
+	}
+	if p.ReferenceAttempts < 0 {
+		return ErrInvalidReferenceRetry
+	}
+	if p.ReferenceNextAttemptAt != nil && (p.Status != WagerStatusPendingReference ||
+		p.ReferenceNextAttemptAt.IsZero() ||
+		p.ReferenceNextAttemptAt.Location() != time.UTC ||
+		p.ReferenceNextAttemptAt.Before(p.CreatedAt)) {
+		return ErrInvalidReferenceRetry
 	}
 	if p.CreatedAt.IsZero() ||
 		p.UpdatedAt.IsZero() ||
@@ -138,7 +161,7 @@ func validateRehydratedOpeningWagerTransaction(
 		p.ReferenceExternalTransactionID != "" ||
 		p.ReferenceTransactionID != "" ||
 		p.FailureCode != "" ||
-		p.ResultBalance != nil {
+		p.ResultBalance != nil || p.ReferenceAttempts != 0 || p.ReferenceNextAttemptAt != nil {
 		return fmt.Errorf(
 			"%w: OPENING contains external-operation metadata",
 			ErrInvalidWagerState,
@@ -195,7 +218,15 @@ func validateRehydratedExternalWagerStatus(
 			return err
 		}
 
-	case WagerStatusRejected, WagerStatusFailed:
+	case WagerStatusRejected:
+		if p.FailureCode == "" {
+			return ErrFailureCodeRequired
+		}
+		if p.ResultBalance != nil {
+			return validateWagerResultBalance(p.Money, *p.ResultBalance)
+		}
+
+	case WagerStatusFailed:
 		if p.FailureCode == "" {
 			return ErrFailureCodeRequired
 		}

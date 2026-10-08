@@ -17,6 +17,16 @@ coverage.*
 !coverage.go
 *.coverprofile
 profile.cov
+*.prof
+
+# Logs and temporary/runtime output
+*.log
+tmp/
+.tmp/
+.cache/
+build/
+dist/
+bin/
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
@@ -25,9 +35,24 @@ profile.cov
 go.work
 go.work.sum
 
-# env file
+# Local environment and credentials. Examples remain versioned.
 .env
+.env.local
+.env.*.local
+tests/http/local.env
+**/private.env
+*.bru.env
+.bruno/
 
 # Editor/IDE
 .idea/
 .vscode/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Local database and container runtime data
+postgres_data/
+.postgres/
+.docker/

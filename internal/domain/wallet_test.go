@@ -51,6 +51,23 @@ func TestNewWallet(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name:           "uninitialized money",
+			id:             "wallet-1",
+			playerID:       "player-1",
+			initialBalance: Money{},
+			wantErr:        true,
+		},
+		{
+			name:     "unsupported money currency",
+			id:       "wallet-1",
+			playerID: "player-1",
+			initialBalance: Money{
+				amount:   100,
+				currency: "USD",
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -109,7 +126,7 @@ func TestWallet_Debit(t *testing.T) {
 		balance     Money
 		debit       Money
 		wantBalance int64
-		wantVersion int32
+		wantVersion int64
 		wantErr     bool
 	}{
 		{
@@ -229,7 +246,7 @@ func TestWallet_Credit(t *testing.T) {
 		balance     Money
 		credit      Money
 		wantBalance int64
-		wantVersion int32
+		wantVersion int64
 		wantErr     bool
 	}{
 		{
@@ -397,5 +414,56 @@ func TestRehydrateWallet(t *testing.T) {
 			updatedAt,
 			wallet.updatedAt,
 		)
+	}
+}
+
+func TestRehydrateWalletPreservesInt64Version(t *testing.T) {
+	createdAt := time.Date(2026, 10, 8, 10, 0, 0, 0, time.UTC)
+	version := int64(1) << 40
+
+	wallet, err := RehydrateWallet(
+		"wallet-1",
+		"player-1",
+		"BRL",
+		Money{amount: 10000, currency: "BRL"},
+		version,
+		createdAt,
+		createdAt,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if wallet.Version() != version {
+		t.Fatalf("expected version %d, got %d", version, wallet.Version())
+	}
+}
+
+func TestRehydrateWalletRejectsInvalidState(t *testing.T) {
+	valid := time.Date(2026, 10, 8, 10, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name      string
+		currency  string
+		balance   Money
+		version   int64
+		createdAt time.Time
+		updatedAt time.Time
+	}{
+		{name: "uninitialized money", currency: "", balance: Money{}, version: 1, createdAt: valid, updatedAt: valid},
+		{name: "currency mismatch", currency: "BRL", balance: Money{amount: 100, currency: "USD"}, version: 1, createdAt: valid, updatedAt: valid},
+		{name: "negative balance", currency: "BRL", balance: Money{amount: -1, currency: "BRL"}, version: 1, createdAt: valid, updatedAt: valid},
+		{name: "invalid version", currency: "BRL", balance: Money{currency: "BRL"}, version: 0, createdAt: valid, updatedAt: valid},
+		{name: "zero created at", currency: "BRL", balance: Money{currency: "BRL"}, version: 1, updatedAt: valid},
+		{name: "zero updated at", currency: "BRL", balance: Money{currency: "BRL"}, version: 1, createdAt: valid},
+		{name: "non UTC created at", currency: "BRL", balance: Money{currency: "BRL"}, version: 1, createdAt: valid.In(time.FixedZone("offset", -3*60*60)), updatedAt: valid},
+		{name: "non UTC updated at", currency: "BRL", balance: Money{currency: "BRL"}, version: 1, createdAt: valid, updatedAt: valid.In(time.FixedZone("offset", -3*60*60))},
+		{name: "updated before created", currency: "BRL", balance: Money{currency: "BRL"}, version: 1, createdAt: valid, updatedAt: valid.Add(-time.Second)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := RehydrateWallet("wallet-1", "player-1", test.currency, test.balance,
+				test.version, test.createdAt, test.updatedAt); err == nil {
+				t.Fatal("expected invalid rehydrated wallet to be rejected")
+			}
+		})
 	}
 }

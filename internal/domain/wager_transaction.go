@@ -57,7 +57,9 @@ type WagerTransaction struct {
 
 	// Persisted so an idempotent replay returns the balance observed
 	// when the original operation was processed.
-	resultBalance *Money
+	resultBalance          *Money
+	referenceAttempts      int32
+	referenceNextAttemptAt *time.Time
 
 	createdAt time.Time
 	updatedAt time.Time
@@ -220,6 +222,17 @@ func (w *WagerTransaction) ResolveReference(transactionID string) error {
 	w.updatedAt = time.Now().UTC()
 
 	return nil
+}
+
+func (w *WagerTransaction) ReferenceAttempts() int32 {
+	return w.referenceAttempts
+}
+
+func (w *WagerTransaction) ReferenceNextAttemptAt() (time.Time, bool) {
+	if w.referenceNextAttemptAt == nil {
+		return time.Time{}, false
+	}
+	return *w.referenceNextAttemptAt, true
 }
 
 func (w *WagerTransaction) ID() string {

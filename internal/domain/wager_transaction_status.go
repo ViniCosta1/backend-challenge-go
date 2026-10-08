@@ -18,6 +18,15 @@ const (
 
 type FailureCode string
 
+const (
+	FailureCodeInsufficientBalance         FailureCode = "INSUFFICIENT_BALANCE"
+	FailureCodeRollbackInsufficientBalance FailureCode = "ROLLBACK_INSUFFICIENT_BALANCE"
+	FailureCodeReferenceNotFound           FailureCode = "REFERENCE_NOT_FOUND"
+	FailureCodeReferenceIncompatible       FailureCode = "REFERENCE_INCOMPATIBLE"
+	FailureCodeReferenceMismatch           FailureCode = "REFERENCE_MISMATCH"
+	FailureCodeReferenceAlreadyReversed    FailureCode = "REFERENCE_ALREADY_REVERSED"
+)
+
 var (
 	ErrInvalidWagerStatus  = errors.New("invalid wager status")
 	ErrFailureCodeRequired = errors.New("failure code is required")
@@ -106,6 +115,7 @@ func (w *WagerTransaction) MarkProcessed(resultBalance Money) error {
 	w.resultBalance = &balance
 
 	w.failureCode = ""
+	w.referenceNextAttemptAt = nil
 	w.updatedAt = time.Now().UTC()
 
 	return nil
@@ -132,8 +142,22 @@ func (w *WagerTransaction) MarkRejected(failureCode FailureCode) error {
 
 	w.status = WagerStatusRejected
 	w.failureCode = failureCode
+	w.referenceNextAttemptAt = nil
 	w.updatedAt = time.Now().UTC()
 
+	return nil
+}
+
+// MarkRejectedWithBalance preserves the observed financial result without
+// applying a movement. Legacy rejections may still have no observed balance.
+func (w *WagerTransaction) MarkRejectedWithBalance(code FailureCode, balance Money) error {
+	if err := validateWagerResultBalance(w.money, balance); err != nil {
+		return err
+	}
+	if err := w.MarkRejected(code); err != nil {
+		return err
+	}
+	w.resultBalance = &balance
 	return nil
 }
 
@@ -158,6 +182,7 @@ func (w *WagerTransaction) MarkFailed(failureCode FailureCode) error {
 
 	w.status = WagerStatusFailed
 	w.failureCode = failureCode
+	w.referenceNextAttemptAt = nil
 	w.updatedAt = time.Now().UTC()
 
 	return nil

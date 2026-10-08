@@ -1,0 +1,5 @@
+.git
+.idea
+.env
+coverage.out
+bin
