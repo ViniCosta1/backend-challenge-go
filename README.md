@@ -175,7 +175,10 @@ PostgreSQL continuam sendo as garantias definitivas.
 
 ## Migrations
 
-O Compose aplica as migrations UP automaticamente. Para execução manual:
+O Compose aplica as migrations UP automaticamente. O Makefile é apenas um
+atalho; para execução manual, escolha uma das opções abaixo.
+
+Com Make:
 
 ```bash
 make migrate-up
@@ -183,9 +186,21 @@ make migrate-version
 make migrate-down
 ```
 
-Use `MIGRATION_STEPS` para reverter mais de uma versão. A migration 000002
-recusa intencionalmente um downgrade que descartaria saldos históricos de
-operações rejeitadas.
+Sem Make, carregue `DATABASE_URL` e execute o `migrate` diretamente:
+
+```bash
+set -a
+source .env
+set +a
+
+migrate -path internal/database/migrations -database "$DATABASE_URL" up
+migrate -path internal/database/migrations -database "$DATABASE_URL" version
+migrate -path internal/database/migrations -database "$DATABASE_URL" down 1
+```
+
+Para reverter mais versões, troque `1` pela quantidade desejada ou use
+`MIGRATION_STEPS` com o Makefile. A migration 000002 recusa intencionalmente um
+downgrade que descartaria saldos históricos de operações rejeitadas.
 
 ## Testes
 
@@ -197,6 +212,30 @@ make test-http         # Hurl contra a API em execução
 make test-integration  # PostgreSQL, Keycloak e MiniStack reais
 make verify            # verificação completa
 ```
+
+Os mesmos comandos sem Make:
+
+```bash
+# Testes, race detector e análise estática
+go test ./...
+go test -race ./...
+go vet ./...
+
+# Contratos HTTP; requer a stack em execução e tests/http/local.env
+hurl --test --variables-file tests/http/local.env tests/http/*.hurl
+
+# Integração real
+set -a
+source .env
+set +a
+export POSTGRES_TEST_DATABASE_URL="${POSTGRES_TEST_DATABASE_URL:-$DATABASE_URL}"
+export KEYCLOAK_TEST_ISSUER_URL="${KEYCLOAK_TEST_ISSUER_URL:-${OIDC_ISSUER_URL:-http://localhost:8081/realms/wager-challenge}}"
+export SQS_TEST_ENDPOINT_URL="${SQS_TEST_ENDPOINT_URL:-${SQS_ENDPOINT_URL:-http://localhost:4566}}"
+bash scripts/test-integration.sh
+```
+
+Para reproduzir `make verify` sem Make, execute os comandos anteriores em
+sequência: testes, race, vet, integração e Hurl.
 
 `make test-integration` verifica as dependências e falha caso uma suíte real
 seja ignorada por falta de infraestrutura. Ele cobre migrations, imutabilidade

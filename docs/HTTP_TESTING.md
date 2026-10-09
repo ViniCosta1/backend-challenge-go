@@ -14,10 +14,18 @@ cp tests/http/local.env.example tests/http/local.env
 make test-http
 ```
 
+O Makefile não é obrigatório. O comando equivalente é:
+
+```bash
+hurl --test \
+  --variables-file tests/http/local.env \
+  tests/http/*.hurl
+```
+
 `tests/http/local.env` é ignorado pelo Git. Cada cenário solicita seus próprios
 tokens ao Keycloak; tokens não são persistidos no repositório.
 
-Para usar outro executável ou arquivo de variáveis:
+Com Make, também é possível escolher outro executável ou arquivo de variáveis:
 
 ```bash
 make test-http HURL=/caminho/para/hurl HTTP_TEST_VARIABLES=/caminho/para/local.env
