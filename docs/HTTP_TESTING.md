@@ -1,50 +1,39 @@
 # Testes HTTP com Hurl
 
-A suíte em `tests/http` exercita a aplicação em execução e suas dependências reais. Ela não substitui os testes Go: os arquivos Hurl verificam o contrato HTTP ponta a ponta, enquanto os testes Go cobrem regras de domínio, persistência, concorrência e cenários de falha com controle mais fino.
-
-## Pré-requisitos
-
-1. Inicie a stack completa:
-
-   ```bash
-   docker compose up --build
-   ```
-
-2. Instale o [Hurl](https://hurl.dev/docs/installation.html).
-3. Crie o arquivo local de variáveis:
-
-   ```bash
-   cp tests/http/local.env.example tests/http/local.env
-   ```
-
-`tests/http/local.env` é ignorado pelo Git. O arquivo de exemplo contém apenas credenciais locais de desenvolvimento e nenhum token persistido. Cada cenário solicita seus próprios tokens por `client_credentials` ao Keycloak.
+A suíte em `tests/http` exercita a API em execução, autenticação real via
+Keycloak e comportamento persistido no PostgreSQL. Ela complementa os testes
+Go, sem substituir os testes de domínio, concorrência e recovery.
 
 ## Execução
 
-Execute toda a suíte com:
+Inicie a stack e prepare o arquivo local de variáveis:
 
 ```bash
+docker compose up --build
+cp tests/http/local.env.example tests/http/local.env
 make test-http
 ```
 
-Por padrão, o target usa `hurl`, `tests/http/local.env` e todos os arquivos `.hurl`. É possível sobrescrever o executável ou o arquivo de variáveis:
+`tests/http/local.env` é ignorado pelo Git. Cada cenário solicita seus próprios
+tokens ao Keycloak; tokens não são persistidos no repositório.
+
+Para usar outro executável ou arquivo de variáveis:
 
 ```bash
 make test-http HURL=/caminho/para/hurl HTTP_TEST_VARIABLES=/caminho/para/local.env
 ```
 
-Os arquivos são independentes e podem ser executados em paralelo pelo modo `--test` do Hurl.
-
-## Cenários
+## Cobertura
 
 - `00_health.hurl`: liveness, readiness e métricas.
-- `01_auth.hurl`: tokens reais dos três clientes e rejeição de credenciais ausentes ou inválidas.
-- `02_wallet.hurl`: criação, consulta, conflito de unicidade e autorização interna.
-- `03_wager_flow.hurl`: fluxo BET, WIN e LOSS com conferência do saldo.
-- `04_idempotency.hurl`: replay exato e conflitos de chave ou transação externa.
-- `05_authorization.hurl`: isolamento entre providers e ausência de efeitos não autorizados.
-- `06_rejections.hurl`: saldo insuficiente e replay com o saldo originalmente observado.
+- `01_auth.hurl`: service accounts reais e credenciais inválidas.
+- `02_wallet.hurl`: criação, consulta, unicidade e autorização interna.
+- `03_wager_flow.hurl`: BET, WIN e LOSS.
+- `04_idempotency.hurl`: replay e conflitos de identidade.
+- `05_authorization.hurl`: isolamento de providers e ausência de efeitos indevidos.
+- `06_rejections.hurl`: saldo insuficiente e replay exato da rejeição.
 - `07_reversals.hurl`: REFUND, ROLLBACK, reversão duplicada e referência pendente.
-- `08_reconciliation.hurl`: ledger paginado, reconciliação e imutabilidade do saldo.
+- `08_reconciliation.hurl`: paginação do Ledger e reconciliação.
 
-Cada arquivo cria sua própria Wallet e captura dinamicamente IDs e tokens. Nenhum cenário depende do estado produzido por outro arquivo.
+Cada arquivo cria seus próprios dados e tokens, sem depender da ordem de
+execução dos demais.

@@ -1,57 +1,47 @@
-# Wager Processing Backend
+# Backend de Processamento de Apostas
 
-## Overview
+Serviço distribuído para carteiras e processamento de apostas, construído com
+Go, PostgreSQL, Keycloak, filas compatíveis com AWS SQS e Uber Fx.
 
-Financial wallet and wager-processing service written in Go. It accepts the
-same business operations over authenticated HTTP and an at-least-once SQS
-input, serializes changes per Wallet in PostgreSQL, and records immutable
-Ledger, Inbox and Outbox state in the same transaction.
+O projeto prioriza integridade financeira:
 
-The executable is composed with Uber Fx and runs PostgreSQL persistence,
-Keycloak/OIDC authentication, the HTTP API, SQS consumer, Outbox publisher and
-pending-reference worker. Local infrastructure is provisioned by Docker
-Compose using Keycloak and MiniStack.
+- dinheiro representado com inteiros, sem ponto flutuante;
+- lock PostgreSQL por Wallet;
+- idempotência financeira persistente;
+- Ledger imutável;
+- Inbox e Outbox transacionais;
+- processamento e recuperação em ambiente at-least-once.
 
-- [Original challenge](./CHALLENGE.md)
-- [Architecture decisions](./ARCHITECTURE.md)
+- [Desafio original](./CHALLENGE.md)
+- [Decisões de arquitetura](./ARCHITECTURE.md)
 
-## Architecture at a glance
+## Arquitetura
 
 ```text
- Keycloak                         MiniStack / SQS
-    |                       input FIFO       events FIFO
-    v                           |                ^
- HTTP API ---------------------+                |
-    |                                            | Outbox publisher
-    v                                            |
- Application use cases / transaction boundary --+
-    |
-    v
- Domain: Money, Wallet, WagerTransaction, Ledger
-    |
-    v
- PostgreSQL: Wallet / Wager / Ledger / Inbox / Outbox
-                         ^
-                         | pending-reference worker
+HTTP + Keycloak         Entrada SQS
+       \                   /
+          Casos de uso
+                |
+             Domínio
+                |
+           PostgreSQL
+ Wallet / Wager / Ledger / Inbox / Outbox
+                |
+     Workers de Outbox e referências -> Eventos SQS
 ```
 
-The domain has no dependency on HTTP, SQS, Fx or PostgreSQL. Application
-declares repository contracts and transaction boundaries; infrastructure
-implements them with pgx, OIDC and AWS SDK adapters.
+O domínio é independente de HTTP, PostgreSQL, SQS, Keycloak e Fx. A camada de
+application define casos de uso, contratos de repositório e transações; a
+infraestrutura implementa os adapters.
 
-## Prerequisites
+## Pré-requisitos
 
-- Docker Engine with Docker Compose v2
-- Go 1.26.8 for host-side builds and tests
-- [Hurl](https://hurl.dev/docs/installation.html) for HTTP contract tests
-- `migrate` v4 when running migrations manually; Compose runs them without a
-  host installation
-- `curl` for integration preflight checks and `jq` for the shell examples
+- Docker Engine e Docker Compose v2
+- Go 1.26.8 para desenvolvimento no host
+- [Hurl](https://hurl.dev/) para os testes de contrato HTTP
+- `migrate` v4 apenas para migrations executadas manualmente
 
-## Quick start
-
-The Compose defaults are sufficient for local development. Copying the example
-is recommended when commands will also run on the host:
+## Executando o serviço
 
 ```bash
 cp .env.example .env
@@ -59,11 +49,8 @@ cp tests/http/local.env.example tests/http/local.env
 docker compose up --build
 ```
 
-On hosts where Docker access requires elevation, use `sudo docker compose`.
-Compose waits for PostgreSQL, applies all migrations, imports the Keycloak realm,
-provisions the SQS queues and starts the application.
-
-Verify the running service:
+O Compose inicia PostgreSQL, Keycloak, MiniStack, migrations e a API. O realm
+do Keycloak e as filas SQS são provisionados automaticamente.
 
 ```bash
 curl --fail http://localhost:8080/health/live
@@ -71,272 +58,161 @@ curl --fail http://localhost:8080/health/ready
 curl --fail http://localhost:8080/metrics
 ```
 
-## Services and ports
-
-| Service | Local endpoint | Purpose |
-|---|---|---|
-| Application | `http://localhost:8080` | HTTP API, health and metrics |
-| PostgreSQL 17 | `localhost:5432` | Application and Keycloak databases |
-| Keycloak | `http://localhost:8081` | OAuth2/OIDC identity provider |
-| MiniStack | `http://localhost:4566` | AWS-compatible SQS endpoint |
-
-The app container uses host networking on Linux so Keycloak's public issuer
-remains exactly `http://localhost:8081/realms/wager-challenge`.
-
-## Environment variables
-
-`.env.example` is the authoritative local template. Important groups are:
-
-| Group | Variables |
+| Serviço | Endereço |
 |---|---|
-| Application | `HTTP_ADDR`, HTTP timeouts, `LOG_LEVEL`, startup/shutdown timeouts |
-| PostgreSQL | `DATABASE_URL`, `DATABASE_MAX_CONNS` |
-| OIDC | `OIDC_ISSUER_URL`, `OIDC_AUDIENCE` |
-| Local clients | `PROVIDER_A_CLIENT_SECRET`, `PROVIDER_B_CLIENT_SECRET`, `INTERNAL_SERVICE_CLIENT_SECRET` |
-| SQS | endpoint, region, dummy credentials, input/DLQ/events queue names and operational timeouts |
-| Workers | Outbox and pending-reference polling/operation settings |
-| Integration | `POSTGRES_TEST_DATABASE_URL`, `KEYCLOAK_TEST_ISSUER_URL`, `SQS_TEST_ENDPOINT_URL` |
+| API | `http://localhost:8080` |
+| PostgreSQL | `localhost:5432` |
+| Keycloak | `http://localhost:8081` |
+| MiniStack | `http://localhost:4566` |
 
-Configuration is validated before lifecycle components start. Queue URLs may
-be provided explicitly; otherwise they are resolved by name.
+As configurações disponíveis estão em [.env.example](./.env.example). Os
+valores e secrets desse arquivo são exclusivos para desenvolvimento local.
 
-## Authentication
+## Autenticação e autorização
 
-Keycloak imports realm `wager-challenge` automatically. Its API audience is
-`wager-api` and it provides service-account clients:
+O Keycloak importa o realm `wager-challenge`, com audience `wager-api`, e cria
+os seguintes clients com service account:
 
-| Client | Role | Local development secret |
+| Client | Permissão | Secret local |
 |---|---|---|
-| `provider-a` | `provider` | `provider-a-local-secret` |
-| `provider-b` | `provider` | `provider-b-local-secret` |
-| `internal-service` | `internal` | `internal-service-local-secret` |
+| `provider-a` | Operações próprias de apostas | `provider-a-local-secret` |
+| `provider-b` | Operações próprias de apostas | `provider-b-local-secret` |
+| `internal-service` | Wallet, Ledger e reconciliação | `internal-service-local-secret` |
 
-These values are intentionally public local-development credentials, not real
-secrets and not suitable for production.
-
-Obtain a client-credentials token:
+Obtendo um token com `client_credentials`:
 
 ```bash
-TOKEN=$(curl --fail --silent \
-  -X POST http://localhost:8081/realms/wager-challenge/protocol/openid-connect/token \
+curl --fail -X POST \
+  http://localhost:8081/realms/wager-challenge/protocol/openid-connect/token \
   -d grant_type=client_credentials \
   -d client_id=internal-service \
-  -d client_secret=internal-service-local-secret | jq -r .access_token)
+  -d client_secret=internal-service-local-secret
 ```
 
-Tokens are validated for issuer, RS256 signature/JWKS, expiry and audience.
-Provider identity comes from signed `azp`, never from a request body.
+A identidade do provider é derivada do token assinado, nunca do payload HTTP.
+Consultas entre providers diferentes retornam `404` sem expor dados.
 
-## Authorization
+## API HTTP
 
-- `internal-service` may create/read Wallets, list Ledger and reconcile.
-- `provider-a` and `provider-b` may process and read only their own wagers.
-- Cross-provider reads return the same 404 as an unknown transaction.
-- A provider cannot override its identity through `providerId` in JSON.
-- Health and metrics endpoints are public.
+| Método | Caminho | Acesso |
+|---|---|---|
+| POST | `/wallets` | Interno |
+| GET | `/wallets/{walletId}` | Interno |
+| GET | `/wallets/{walletId}/ledger` | Interno |
+| POST | `/wallets/{walletId}/reconciliation` | Interno |
+| POST | `/wagering/transactions` | Provider |
+| GET | `/wagering/transactions/{transactionId}` | Provider proprietário |
+| GET | `/providers/{providerId}/wagering/transactions/{externalTransactionId}` | Provider proprietário |
+| GET | `/health/live` | Público |
+| GET | `/health/ready` | Público |
+| GET | `/metrics` | Público |
 
-SQS has a separate trust boundary: its producer is considered an authorized
-internal service and asserts the business `providerId` in the envelope. OIDC
-applies to HTTP. Production IAM and Queue Policies belong to deployment and are
-outside this repository; MiniStack credentials are compatibility-only dummy
-values. Financial correctness still relies on Inbox, persistent idempotency,
-constraints and PostgreSQL locking rather than FIFO security/deduplication.
-
-## HTTP examples
-
-Create a Wallet with an internal token:
+Criando uma Wallet:
 
 ```bash
-curl --fail -X POST http://localhost:8080/wallets \
-  -H "Authorization: Bearer $TOKEN" \
+curl -X POST http://localhost:8080/wallets \
+  -H "Authorization: Bearer $INTERNAL_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"playerId":"11111111-1111-4111-8111-111111111111","initialBalance":{"amount":"100.00","currency":"BRL"}}'
+  -d '{
+    "playerId": "11111111-1111-4111-8111-111111111111",
+    "initialBalance": {"amount": "100.00", "currency": "BRL"}
+  }'
 ```
 
-Obtain a provider token, then submit a BET. Save the Wallet/player IDs returned
-above in `WALLET_ID` and `PLAYER_ID`:
+Processando uma BET:
 
 ```bash
-PROVIDER_TOKEN=$(curl --fail --silent \
-  -X POST http://localhost:8081/realms/wager-challenge/protocol/openid-connect/token \
-  -d grant_type=client_credentials -d client_id=provider-a \
-  -d client_secret=provider-a-local-secret | jq -r .access_token)
-
-curl --fail -X POST http://localhost:8080/wagering/transactions \
+curl -X POST http://localhost:8080/wagering/transactions \
   -H "Authorization: Bearer $PROVIDER_TOKEN" \
-  -H 'Idempotency-Key: bet-example-1' \
+  -H 'Idempotency-Key: bet-1' \
   -H 'Content-Type: application/json' \
-  -d "{\"externalTransactionId\":\"bet-example-1\",\"playerId\":\"$PLAYER_ID\",\"walletId\":\"$WALLET_ID\",\"roundId\":\"round-1\",\"gameId\":\"game-1\",\"kind\":\"BET\",\"money\":{\"amount\":\"25.00\",\"currency\":\"BRL\"}}"
+  -d '{
+    "externalTransactionId": "bet-1",
+    "playerId": "11111111-1111-4111-8111-111111111111",
+    "walletId": "WALLET_UUID",
+    "roundId": "round-1",
+    "gameId": "game-1",
+    "kind": "BET",
+    "money": {"amount": "25.00", "currency": "BRL"}
+  }'
 ```
 
-Repeating exactly that request returns the original balance with
-`idempotentReplay: true`. A WIN uses `kind: "WIN"` and a positive amount; it may
-optionally reference a processed BET from the same round without requiring the
-same amount. REFUND/ROLLBACK include:
+Repetir a mesma operação retorna o resultado original com
+`idempotentReplay: true`. REFUND, ROLLBACK e WIN com referência usam o campo
+`referenceExternalTransactionId`.
 
-```json
-"referenceExternalTransactionId": "bet-example-1"
-```
+Money é sempre uma string com exatamente duas casas decimais e, no fluxo
+atual, utiliza BRL. Valores em ponto flutuante não são aceitos.
 
-Useful reads:
+Principais status HTTP:
 
-```bash
-curl -H "Authorization: Bearer $PROVIDER_TOKEN" \
-  http://localhost:8080/providers/provider-a/wagering/transactions/bet-example-1
-curl -H "Authorization: Bearer $TOKEN" \
-  "http://localhost:8080/wallets/$WALLET_ID/ledger?limit=50"
-curl -X POST -H "Authorization: Bearer $TOKEN" \
-  http://localhost:8080/wallets/$WALLET_ID/reconciliation
-```
+- `200`: operação processada, replay ou consulta;
+- `201`: Wallet criada;
+- `202`: `PENDING_REFERENCE` persistido;
+- `400`: entrada inválida;
+- `401` / `403`: falha de autenticação ou autorização;
+- `404`: recurso ausente ou ocultado entre providers;
+- `409`: conflito de unicidade ou idempotência;
+- `422`: rejeição definitiva de negócio;
+- `503`: dependência indisponível.
 
-Ledger pagination uses an opaque keyset cursor; pass the returned `nextCursor`
-without decoding or changing it.
+## SQS
 
-## HTTP status codes
-
-| Status | Meaning |
-|---|---|
-| 200 | Successful/replayed wager or successful read/reconciliation |
-| 201 | Wallet created |
-| 202 | Referenced operation persisted as `PENDING_REFERENCE` |
-| 400 | Invalid JSON, Money, UUID or business input shape |
-| 401 | Missing, invalid or expired token |
-| 403 | Authenticated identity lacks permission or attempts provider spoofing |
-| 404 | Resource absent or intentionally hidden across provider boundaries |
-| 409 | Wallet uniqueness or persistent idempotency/external-ID conflict |
-| 422 | Durable business rejection, with stable `failureCode` |
-| 503 | Required infrastructure temporarily unavailable |
-
-Unsupported request media type returns 415; unexpected internal errors return
-500 without exposing implementation details.
-
-## Money
-
-JSON Money uses a decimal string with exactly two digits after the point, for
-example `{"amount":"25.00","currency":"BRL"}`. The domain converts this to
-`int64` minor units with overflow checks; it never uses floating point. The
-current financial flow is BRL-only. See [ARCHITECTURE.md](./ARCHITECTURE.md).
-
-## SQS / MiniStack
-
-Compose provisions these FIFO queues automatically:
+O Compose provisiona automaticamente:
 
 - `wager-transactions.fifo`
 - `wager-transactions-dlq.fifo`
 - `wager-events.fifo`
 
-Input defaults are a 30-second visibility timeout, 20-second long polling and
-redrive after five receives; the DLQ retains messages for 14 days. Producers
-use `MessageGroupId=walletId` and `MessageDeduplicationId=messageId`. Integration
-events use aggregate ID and stable event ID respectively. Neither FIFO ordering
-nor its deduplication window replaces database-backed idempotency.
+A fila de entrada usa visibility timeout de 30 segundos, long polling de 20
+segundos e redrive após cinco recebimentos. Produtores devem usar `walletId`
+como `MessageGroupId` e `messageId` como `MessageDeduplicationId`.
+
+O produtor SQS é considerado um serviço interno confiável. IAM e Queue Policies
+de produção pertencem ao ambiente de deployment. A correção financeira não
+depende da deduplicação FIFO: constraints, Inbox, idempotência e locks do
+PostgreSQL continuam sendo as garantias definitivas.
 
 ## Migrations
 
-Compose runs UP automatically. With `DATABASE_URL` and the `migrate` binary on
-the host:
+O Compose aplica as migrations UP automaticamente. Para execução manual:
 
 ```bash
 make migrate-up
 make migrate-version
-make migrate-down                    # one migration by default
-make migrate-down MIGRATION_STEPS=3  # full current schema on a clean database
+make migrate-down
 ```
 
-Migration 000002 deliberately refuses DOWN when rejected transactions already
-contain result-balance snapshots. Reverting them would discard exact replay
-history; use a clean/compatible database rather than deleting audit data.
+Use `MIGRATION_STEPS` para reverter mais de uma versão. A migration 000002
+recusa intencionalmente um downgrade que descartaria saldos históricos de
+operações rejeitadas.
 
-## Tests
-
-### Unit and standard package tests
+## Testes
 
 ```bash
-make test
-make test-race
-make vet
+make test              # testes Go padrão
+make test-race         # race detector
+make vet               # análise estática
+make test-http         # Hurl contra a API em execução
+make test-integration  # PostgreSQL, Keycloak e MiniStack reais
+make verify            # verificação completa
 ```
 
-The standard Go command may skip tests that require external infrastructure.
+`make test-integration` verifica as dependências e falha caso uma suíte real
+seja ignorada por falta de infraestrutura. Ele cobre migrations, imutabilidade
+do Ledger, concorrência, recovery, mensageria e três processos OS independentes.
 
-### HTTP contract tests
+Consulte [HTTP_TESTING.md](./docs/HTTP_TESTING.md) para executar o Hurl.
 
-```bash
-cp tests/http/local.env.example tests/http/local.env
-make test-http
-```
+## Garantias e limitações
 
-Hurl obtains real client-credentials tokens and exercises the running stack.
-Details: [docs/HTTP_TESTING.md](./docs/HTTP_TESTING.md).
+- Wallet, wager, Ledger, Inbox e Outbox são atômicos quando aplicável.
+- Operações da mesma Wallet são serializadas com `SELECT ... FOR UPDATE`.
+- Replays financeiros retornam o resultado originalmente persistido.
+- SQS e eventos de integração são at-least-once, não exactly-once.
+- O eventId permanece estável durante retries e republicações.
+- Referências pendentes e retries sobrevivem a reinicializações.
+- Keycloak e MiniStack locais não representam hardening de produção.
+- O Ledger é um histórico auditável single-entry, não contabilidade double-entry.
 
-### Real integration tests
-
-```bash
-make test-integration
-```
-
-This target requires reachable PostgreSQL, Keycloak and MiniStack. It performs
-preflight checks, exports the integration variables, runs the real suites and
-fails if an infrastructure-gated suite was skipped. Defaults come from `.env`;
-override the three `*_TEST_*` variables for a dedicated environment.
-
-### Full verification
-
-```bash
-make verify
-```
-
-This runs standard tests, race detector, vet, real integration and Hurl. Start
-the complete Compose stack first.
-
-## Required distributed scenarios
-
-The real integration suite contains reproducible tests for:
-
-- 50 concurrent duplicates producing one financial movement;
-- two distinct BET 80 against Wallet 100 yielding one PROCESSED, one REJECTED,
-  balance 20 and one debit;
-- independent Wallets progressing without a global lock;
-- three OS processes running full Fx applications against shared dependencies;
-- commit-before-SQS-delete redelivery;
-- two competing Outbox publishers and publish-before-mark recovery;
-- pending reference before its original operation and restart recovery;
-- equivalent operation crossing HTTP/SQS in both orders.
-
-Run all of them with `make test-integration`; test names and exact assertions
-live beside their adapters under `internal/**/**_integration_test.go`.
-
-## Failure and recovery guarantees
-
-- PostgreSQL uniqueness and `SELECT ... FOR UPDATE` provide cross-process
-  financial idempotency and per-Wallet serialization.
-- Inbox completion shares the financial transaction; SQS delete happens only
-  after commit.
-- Financial data and Outbox snapshots commit together; publication is
-  at-least-once with a stable event ID.
-- Unresolved references persist attempts and exponential backoff, survive
-  restart and eventually resolve or become a terminal rejection.
-- Broker redrive handles transient/permanent input failures after a finite
-  number of receives. Exactly-once across PostgreSQL and SQS is not claimed.
-
-## Troubleshooting
-
-- If Docker commands return permission denied, use the host's configured Docker
-  group or prefix Compose commands with `sudo`.
-- Ports 5432, 4566, 8080 and 8081 must be free.
-- Keycloak import does not overwrite an existing persisted realm. If local
-  development secrets changed, recreate the local volumes intentionally.
-- `make test-integration` fails early when any real dependency is unavailable;
-  check `/health/ready`, container health and the three integration URLs.
-- Manual migration DOWN 000002 can fail by design when it would discard
-  rejected-result history.
-- Host networking used by the app service is Linux-oriented. On another Docker
-  platform, run `go run ./cmd/api` on the host or provide networking/issuer URLs
-  that preserve the exact OIDC issuer.
-
-## Documentation
-
-- [CHALLENGE.md](./CHALLENGE.md) — immutable original statement
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — decisions, invariants and trade-offs
-- [docs/HTTP_TESTING.md](./docs/HTTP_TESTING.md) — Hurl usage and scenarios
-- [tests/http](./tests/http) — executable HTTP contracts
+As justificativas e trade-offs estão em [ARCHITECTURE.md](./ARCHITECTURE.md).
